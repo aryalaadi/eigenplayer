@@ -51,9 +51,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let audio_backend = Arc::new(Mutex::new(AudioBackend::with_ring_buffer_size(ring_buffer_size,
-										default_volume)?));
-    println!("[Audio] Initialized audio backend with {} prebuffer packets", ring_buffer_size);
+    let audio_backend = Arc::new(Mutex::new(AudioBackend::with_ring_buffer_size(
+        ring_buffer_size,
+        default_volume,
+    )?));
+    println!(
+        "[Audio] Initialized audio backend with {} prebuffer packets",
+        ring_buffer_size
+    );
 
     let audio_for_track = Arc::clone(&audio_backend);
     if let Some(prop) = core.properties.get_mut("current_track") {

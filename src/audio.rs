@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
-use ringbuf::{traits::*, HeapRb};
+use ringbuf::{HeapRb, traits::*};
 use std::fs::File;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -26,14 +26,13 @@ struct AudioState {
     stop_signal: bool,
 }
 
-
-// im only using ring buffer because thats the only resonable thing i could think of 
+// im only using ring buffer because thats the only resonable thing i could think of
 // not sure if I know what im doing but it works
 // also gives me more room to play with the audio without over/underruns
 impl AudioBackend {
     pub fn with_ring_buffer_size(
         ring_buffer_size: usize,
-	default_volume: f32,
+        default_volume: f32,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let host = cpal::default_host();
         let device = host
@@ -43,7 +42,7 @@ impl AudioBackend {
         let config = device.default_output_config()?.into();
 
         let state = Arc::new(Mutex::new(AudioState {
-            playing: false, 
+            playing: false,
             volume: default_volume,
             stop_signal: false,
         }));
@@ -54,15 +53,18 @@ impl AudioBackend {
             stream: None,
             state,
             decoder_thread: None,
-	    ring_buffer_size
+            ring_buffer_size,
         })
     }
 
     pub fn load_track(&mut self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!("[Audio Backend] Loading track: {}", path);
 
+        // kinda need to do this
         self.stop_decoder();
         let file = Box::new(File::open(path)?);
+
+        // we let symphonia deal with the file
         let mss = MediaSourceStream::new(file, Default::default());
 
         let mut hint = Hint::new();
@@ -74,6 +76,7 @@ impl AudioBackend {
             &hint,
             mss,
             &FormatOptions::default(),
+            // need to do alot with this
             &MetadataOptions::default(),
         )?;
 
@@ -83,6 +86,9 @@ impl AudioBackend {
         let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())?;
 
+        // bridge between decoder thread and cpal callback
+        // producer will write decoded samples
+        // consumer will read and play
         let ring = HeapRb::<f32>::new(self.ring_buffer_size);
         let (mut producer, consumer) = ring.split();
 
@@ -117,8 +123,9 @@ impl AudioBackend {
 
                 for sample in buf.samples() {
                     while producer.try_push(*sample).is_err() {
+                        // you can rest twin
                         thread::sleep(std::time::Duration::from_micros(100));
-                        
+
                         let state = state.lock().unwrap();
                         if state.stop_signal {
                             return;
@@ -149,6 +156,7 @@ impl AudioBackend {
                 }
 
                 for sample in data.iter_mut() {
+                    // consume and apply volume on the sample
                     *sample = consumer.try_pop().unwrap_or(0.0) * state.volume;
                 }
             },
