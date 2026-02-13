@@ -1,10 +1,12 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
+use ringbuf::{traits::*, HeapRb};
 use std::fs::File;
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{Decoder, DecoderOptions};
-use symphonia::core::formats::{FormatOptions, FormatReader};
+use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -14,24 +16,25 @@ pub struct AudioBackend {
     config: StreamConfig,
     stream: Option<Stream>,
     state: Arc<Mutex<AudioState>>,
-    prebuffer_packets: usize,
+    decoder_thread: Option<JoinHandle<()>>,
+    ring_buffer_size: usize,
 }
 
 struct AudioState {
     playing: bool,
     volume: f32,
-    decoder: Option<Box<dyn Decoder>>,
-    format: Option<Box<dyn FormatReader>>,
-    sample_buffer: Vec<f32>,
-    buffer_position: usize,
+    stop_signal: bool,
 }
 
-impl AudioBackend {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        Self::with_prebuffer(50)
-    }
 
-    pub fn with_prebuffer(prebuffer_packets: usize) -> Result<Self, Box<dyn std::error::Error>> {
+// im only using ring buffer because thats the only resonable thing i could think of 
+// not sure if I know what im doing but it works
+// also gives me more room to play with the audio without over/underruns
+impl AudioBackend {
+    pub fn with_ring_buffer_size(
+        ring_buffer_size: usize,
+	default_volume: f32,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -40,12 +43,9 @@ impl AudioBackend {
         let config = device.default_output_config()?.into();
 
         let state = Arc::new(Mutex::new(AudioState {
-            playing: false,
-            volume: 0.5,
-            decoder: None,
-            format: None,
-            sample_buffer: Vec::new(),
-            buffer_position: 0,
+            playing: false, 
+            volume: default_volume,
+            stop_signal: false,
         }));
 
         Ok(Self {
@@ -53,13 +53,15 @@ impl AudioBackend {
             config,
             stream: None,
             state,
-            prebuffer_packets,
+            decoder_thread: None,
+	    ring_buffer_size
         })
     }
 
     pub fn load_track(&mut self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!("[Audio Backend] Loading track: {}", path);
 
+        self.stop_decoder();
         let file = Box::new(File::open(path)?);
         let mss = MediaSourceStream::new(file, Default::default());
 
@@ -75,60 +77,69 @@ impl AudioBackend {
             &MetadataOptions::default(),
         )?;
 
-        let mut format = probed.format;
+        let format = probed.format;
         let track = format.default_track().ok_or("No default track found")?;
 
-        let mut decoder = symphonia::default::get_codecs()
+        let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())?;
 
-        let mut initial_samples = Vec::new();
-        let mut packets_decoded = 0;
-
-        while packets_decoded < self.prebuffer_packets {
-            match format.next_packet() {
-                Ok(packet) => match decoder.decode(&packet) {
-                    Ok(decoded) => {
-                        let spec = *decoded.spec();
-                        let duration = decoded.capacity() as u64;
-                        let mut buf = SampleBuffer::<f32>::new(duration, spec);
-                        buf.copy_interleaved_ref(decoded);
-                        initial_samples.extend_from_slice(buf.samples());
-                        packets_decoded += 1;
-                    }
-                    Err(_) => continue,
-                },
-                Err(_) => break,
-            }
-        }
-
-        let mut state = self.state.lock().unwrap();
-        state.decoder = Some(decoder);
-        state.format = Some(format);
-        state.sample_buffer = initial_samples;
-        state.buffer_position = 0;
-
-        println!(
-            "[Audio Backend] Track loaded with {} pre-buffered samples",
-            state.sample_buffer.len()
-        );
-
-        Ok(())
-    }
-
-    pub fn play(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("[Audio Backend] Starting playback");
+        let ring = HeapRb::<f32>::new(self.ring_buffer_size);
+        let (mut producer, consumer) = ring.split();
 
         let state = Arc::clone(&self.state);
 
-        {
-            let mut s = state.lock().unwrap();
-            s.playing = true;
-        }
+        let decoder_thread = thread::spawn(move || {
+            let mut decoder = decoder;
+            let mut format = format;
+
+            loop {
+                {
+                    let state = state.lock().unwrap();
+                    if state.stop_signal {
+                        break;
+                    }
+                }
+
+                let packet = match format.next_packet() {
+                    Ok(p) => p,
+                    Err(_) => break,
+                };
+
+                let decoded = match decoder.decode(&packet) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+
+                let spec = *decoded.spec();
+                let duration = decoded.capacity() as u64;
+                let mut buf = SampleBuffer::<f32>::new(duration, spec);
+                buf.copy_interleaved_ref(decoded);
+
+                for sample in buf.samples() {
+                    while producer.try_push(*sample).is_err() {
+                        thread::sleep(std::time::Duration::from_micros(100));
+                        
+                        let state = state.lock().unwrap();
+                        if state.stop_signal {
+                            return;
+                        }
+                    }
+                }
+            }
+
+            println!("[Audio Backend] Decoder thread finished");
+        });
+
+        self.decoder_thread = Some(decoder_thread);
+
+        let state_for_callback = Arc::clone(&self.state);
+        let consumer = Arc::new(Mutex::new(consumer));
 
         let stream = self.device.build_output_stream(
             &self.config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let mut state = state.lock().unwrap();
+                let state = state_for_callback.lock().unwrap();
+                let mut consumer = consumer.lock().unwrap();
 
                 if !state.playing {
                     for sample in data.iter_mut() {
@@ -138,48 +149,7 @@ impl AudioBackend {
                 }
 
                 for sample in data.iter_mut() {
-                    while state.buffer_position >= state.sample_buffer.len() {
-                        let has_decoder = state.decoder.is_some() && state.format.is_some();
-                        if !has_decoder {
-                            state.playing = false;
-                            *sample = 0.0;
-                            return;
-                        }
-
-                        let packet_result = state.format.as_mut().unwrap().next_packet();
-
-                        match packet_result {
-                            Ok(packet) => match state.decoder.as_mut().unwrap().decode(&packet) {
-                                Ok(decoded) => {
-                                    let spec = *decoded.spec();
-                                    let duration = decoded.capacity() as u64;
-                                    let mut buf = SampleBuffer::<f32>::new(duration, spec);
-                                    buf.copy_interleaved_ref(decoded);
-
-                                    state.sample_buffer.clear();
-                                    state.sample_buffer.extend_from_slice(buf.samples());
-                                    state.buffer_position = 0;
-                                }
-                                Err(_) => {
-                                    state.playing = false;
-                                    *sample = 0.0;
-                                    return;
-                                }
-                            },
-                            Err(_) => {
-                                state.playing = false;
-                                *sample = 0.0;
-                                return;
-                            }
-                        }
-                    }
-
-                    if state.buffer_position < state.sample_buffer.len() {
-                        *sample = state.sample_buffer[state.buffer_position] * state.volume;
-                        state.buffer_position += 1;
-                    } else {
-                        *sample = 0.0;
-                    }
+                    *sample = consumer.try_pop().unwrap_or(0.0) * state.volume;
                 }
             },
             |err| eprintln!("[Audio Backend] Stream error: {}", err),
@@ -189,6 +159,29 @@ impl AudioBackend {
         stream.play()?;
         self.stream = Some(stream);
 
+        println!("[Audio Backend] Track loaded, decoder thread started");
+
+        Ok(())
+    }
+
+    fn stop_decoder(&mut self) {
+        if let Some(thread) = self.decoder_thread.take() {
+            {
+                let mut state = self.state.lock().unwrap();
+                state.stop_signal = true;
+            }
+            thread.join().ok();
+            {
+                let mut state = self.state.lock().unwrap();
+                state.stop_signal = false;
+            }
+        }
+    }
+
+    pub fn play(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        println!("[Audio Backend] Starting playback");
+        let mut state = self.state.lock().unwrap();
+        state.playing = true;
         Ok(())
     }
 
@@ -200,10 +193,9 @@ impl AudioBackend {
 
     pub fn stop(&mut self) {
         println!("[Audio Backend] Stopping playback");
+        self.stop_decoder();
         let mut state = self.state.lock().unwrap();
         state.playing = false;
-        state.buffer_position = 0;
-        state.sample_buffer.clear();
     }
 
     pub fn set_volume(&mut self, volume: f32) {
@@ -215,6 +207,12 @@ impl AudioBackend {
     pub fn is_playing(&self) -> bool {
         let state = self.state.lock().unwrap();
         state.playing
+    }
+}
+
+impl Drop for AudioBackend {
+    fn drop(&mut self) {
+        self.stop_decoder();
     }
 }
 

@@ -21,13 +21,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let default_volume = config
-        .get_nested_number("audio", "default_volume")
+        .get_nested_float("audio", "default_volume")
         .or_else(|| config.get_number("volume"))
         .unwrap_or(0.5) as f32;
 
-    let prebuffer_packets = config
-        .get_nested_number("audio", "prebuffer_packets")
-        .unwrap_or(50.0) as usize;
+    // 88200 = 2 seconds at 44.1 kHz
+    // its the standard audio quality
+    // config.lua lets you set this to whatever
+    let ring_buffer_size = config
+        .get_nested_usize("audio", "ring_buffer_size")
+        .unwrap_or(88200) as usize;
 
     let mut core = Core::new();
     core.add_property("playing", PropertyValue::Bool(false));
@@ -48,8 +51,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let audio_backend = Arc::new(Mutex::new(AudioBackend::with_prebuffer(prebuffer_packets)?));
-    println!("[Audio] Initialized audio backend with {} prebuffer packets", prebuffer_packets);
+    let audio_backend = Arc::new(Mutex::new(AudioBackend::with_ring_buffer_size(ring_buffer_size,
+										default_volume)?));
+    println!("[Audio] Initialized audio backend with {} prebuffer packets", ring_buffer_size);
 
     let audio_for_track = Arc::clone(&audio_backend);
     if let Some(prop) = core.properties.get_mut("current_track") {

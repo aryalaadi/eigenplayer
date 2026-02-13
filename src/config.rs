@@ -70,11 +70,23 @@ impl Config {
         }
     }
 
-    pub fn get_nested_number(&self, table: &str, key: &str) -> Option<f64> {
+    pub fn get_nested_float(&self, table: &str, key: &str) -> Option<f64> {
         if let Some(lua) = &self.lua {
             if let Ok(globals) = lua.globals().get::<Table>("config") {
                 if let Ok(nested) = globals.get::<Table>(table) {
                     if let Ok(value) = nested.get::<f64>(key) {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        None
+    }
+    pub fn get_nested_usize(&self, table: &str, key: &str) -> Option<usize> {
+        if let Some(lua) = &self.lua {
+            if let Ok(globals) = lua.globals().get::<Table>("config") {
+                if let Ok(nested) = globals.get::<Table>(table) {
+                    if let Ok(value) = nested.get::<usize>(key) {
                         return Some(value);
                     }
                 }

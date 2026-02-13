@@ -1,6 +1,6 @@
 config = {
     audio = {
-        prebuffer_packets = 300,
+        ring_buffer_size = 88200,
         default_volume = 0.1,
     }
 }
