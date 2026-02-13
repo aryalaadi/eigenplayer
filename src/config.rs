@@ -94,4 +94,40 @@ impl Config {
         }
         None
     }
+
+    pub fn get_nested_bool(&self, table: &str, key: &str) -> Option<bool> {
+        if let Some(lua) = &self.lua {
+            if let Ok(globals) = lua.globals().get::<Table>("config") {
+                if let Ok(nested) = globals.get::<Table>(table) {
+                    if let Ok(value) = nested.get::<bool>(key) {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_nested_eq_bands(&self, table: &str, key: &str) -> Option<Vec<[f32; 4]>> {
+        if let Some(lua) = &self.lua {
+            if let Ok(globals) = lua.globals().get::<mlua::Table>("config") {
+                if let Ok(nested) = globals.get::<mlua::Table>(table) {
+                    if let Ok(bands_table) = nested.get::<mlua::Table>(key) {
+                        let mut bands = Vec::new();
+                        for band in bands_table.sequence_values::<mlua::Table>() {
+                            if let Ok(b) = band {
+                                let mut arr = [0.0f32; 4];
+                                for i in 1..=4 {
+                                    arr[i - 1] = b.get::<f32>(i).unwrap_or(0.0);
+                                }
+                                bands.push(arr);
+                            }
+                        }
+                        return Some(bands);
+                    }
+                }
+            }
+        }
+        None
+    }
 }

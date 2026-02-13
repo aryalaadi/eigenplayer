@@ -32,6 +32,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_nested_usize("audio", "ring_buffer_size")
         .unwrap_or(88200) as usize;
 
+    let enable_eq = config
+        .get_nested_bool("audio", "enable_eq")
+        .unwrap_or(false) as bool;
+    let eq_bands: Vec<[f32; 4]> = config
+        .get_nested_eq_bands("audio", "eq_bands")
+        .unwrap_or_default();
+
     let mut core = Core::new();
     core.add_property("playing", PropertyValue::Bool(false));
     core.add_property("current_track", PropertyValue::String("none".to_string()));
@@ -54,6 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let audio_backend = Arc::new(Mutex::new(AudioBackend::with_ring_buffer_size(
         ring_buffer_size,
         default_volume,
+        enable_eq,
+        eq_bands,
     )?));
     println!(
         "[Audio] Initialized audio backend with {} prebuffer packets",

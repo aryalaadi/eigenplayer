@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Stream, StreamConfig};
+use cpal::{Device, Stream, StreamConfig, SupportedStreamConfig};
 use ringbuf::{HeapRb, traits::*};
 use std::fs::File;
 use std::sync::{Arc, Mutex};
@@ -11,6 +11,8 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+use crate::eq::Eq;
+
 pub struct AudioBackend {
     device: Device,
     config: StreamConfig,
@@ -18,6 +20,7 @@ pub struct AudioBackend {
     state: Arc<Mutex<AudioState>>,
     decoder_thread: Option<JoinHandle<()>>,
     ring_buffer_size: usize,
+    eq: Arc<Mutex<Eq>>,
 }
 
 struct AudioState {
@@ -33,13 +36,15 @@ impl AudioBackend {
     pub fn with_ring_buffer_size(
         ring_buffer_size: usize,
         default_volume: f32,
+        enable_eq: bool,
+        eq_bands: Vec<[f32; 4]>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
             .ok_or("No output device available")?;
 
-        let config = device.default_output_config()?.into();
+        let config: SupportedStreamConfig = device.default_output_config()?.into();
 
         let state = Arc::new(Mutex::new(AudioState {
             playing: false,
@@ -47,13 +52,17 @@ impl AudioBackend {
             stop_signal: false,
         }));
 
+        let eq = { Eq::from_config(eq_bands.clone(), enable_eq, config.sample_rate() as f32) };
+
+        let eq = Arc::new(Mutex::new(eq));
         Ok(Self {
             device,
-            config,
+            config: config.into(),
             stream: None,
             state,
             decoder_thread: None,
             ring_buffer_size,
+            eq,
         })
     }
 
@@ -141,12 +150,14 @@ impl AudioBackend {
 
         let state_for_callback = Arc::clone(&self.state);
         let consumer = Arc::new(Mutex::new(consumer));
+        let eq = Arc::clone(&self.eq);
 
         let stream = self.device.build_output_stream(
             &self.config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let state = state_for_callback.lock().unwrap();
                 let mut consumer = consumer.lock().unwrap();
+                let mut eq = eq.lock().unwrap();
 
                 if !state.playing {
                     for sample in data.iter_mut() {
@@ -157,7 +168,12 @@ impl AudioBackend {
 
                 for sample in data.iter_mut() {
                     // consume and apply volume on the sample
-                    *sample = consumer.try_pop().unwrap_or(0.0) * state.volume;
+                    // and apply eq
+                    let mut s = consumer.try_pop().unwrap_or(0.0);
+                    if eq.enabled {
+                        s = eq.process(s);
+                    }
+                    *sample = s * state.volume;
                 }
             },
             |err| eprintln!("[Audio Backend] Stream error: {}", err),
