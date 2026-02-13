@@ -1,6 +1,6 @@
 config = {
-    volume = 0.8,
-    theme = "dark",
-    audio_backend = "alsa",
-    shaders_enabled = true
+    audio = {
+        prebuffer_packets = 300,
+        default_volume = 0.1,
+    }
 }

@@ -11,12 +11,14 @@ pub enum ConfigValue {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub values: HashMap<String, ConfigValue>,
+    lua: Option<Lua>,
 }
 
 impl Config {
     pub fn new() -> Self {
         Self {
             values: HashMap::new(),
+            lua: None,
         }
     }
 
@@ -42,6 +44,8 @@ impl Config {
             config.values.insert(key, config_value);
         }
 
+        config.lua = Some(lua);
+
         Ok(config)
     }
 
@@ -64,5 +68,18 @@ impl Config {
             ConfigValue::Bool(b) => Some(*b),
             _ => None,
         }
+    }
+
+    pub fn get_nested_number(&self, table: &str, key: &str) -> Option<f64> {
+        if let Some(lua) = &self.lua {
+            if let Ok(globals) = lua.globals().get::<Table>("config") {
+                if let Ok(nested) = globals.get::<Table>(table) {
+                    if let Ok(value) = nested.get::<f64>(key) {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        None
     }
 }

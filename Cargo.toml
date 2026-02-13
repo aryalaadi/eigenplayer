@@ -3,9 +3,18 @@ name = "eigenplayer"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "eigenplayer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "eigenplayer"
+path = "src/main.rs"
+
 [dependencies]
 cpal = "0.17.1"
 mlua = { version = "0.11.6", features = ["lua54", "async", "macros"] }
-symphonia = "0.5.5"
+symphonia = { version = "0.5.5", features = ["mp3", "flac", "wav", "aac"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 wgpu = "28.0.0"
 winit = "0.30.12"
