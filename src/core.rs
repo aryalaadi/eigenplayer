@@ -102,23 +102,29 @@ impl Core {
     }
 
     pub fn set_property(&mut self, name: &str, value: PropertyValue) {
-        let prop_callbacks = if let Some(prop) = self.properties.get_mut(name) {
-            prop.set(value.clone());
-            prop.callbacks.clone()
-        } else {
-            return;
-        };
-
-        for cb in &prop_callbacks {
-            cb(&value, self);
-        }
-
-        let event = EventType::PropertyChanged(name.to_string());
-
-        for cb in &self.event_callbacks {
-            cb(&event, self);
-        }
+    println!("[set_property] Called for '{}' with value: {:?}", name, value);
+    
+    let prop_callbacks = if let Some(prop) = self.properties.get_mut(name) {
+        prop.set(value.clone());
+        println!("[set_property] Found property, callbacks count: {}", prop.callbacks.len());
+        prop.callbacks.clone()
+    } else {
+        println!("[set_property] Property '{}' not found!", name);
+        return;
+    };
+    
+    println!("[set_property] Running {} property callbacks", prop_callbacks.len());
+    for cb in &prop_callbacks {
+        println!("[set_property] Calling a property callback...");
+        cb(&value, self);
+        println!("[set_property] Callback returned");
     }
+    
+    let event = EventType::PropertyChanged(name.to_string());
+    for cb in &self.event_callbacks {
+        cb(&event, self);
+    }
+} 
 
     pub fn get_property(&self, name: &str) -> Option<&PropertyValue> {
         self.properties.get(name).map(|p| p.get())

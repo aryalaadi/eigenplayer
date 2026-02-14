@@ -64,10 +64,6 @@ impl Repl {
                     core.execute_command("pause", vec![]);
                     println!("Paused");
                 }
-                "stop" => {
-                    core.execute_command("stop", vec![]);
-                    println!("Stopped");
-                }
                 "next" | "n" => {
                     core.execute_command("next", vec![]);
                 }

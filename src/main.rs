@@ -3,6 +3,7 @@ use eigenplayer::config::Config;
 use eigenplayer::core::*;
 use eigenplayer::db::Database;
 use eigenplayer::repl::Repl;
+use eigenplayer::commands::*;
 
 use std::sync::{Arc, Mutex};
 
@@ -44,7 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     core.add_property("current_track", PropertyValue::String("none".to_string()));
     core.add_property("volume", PropertyValue::Float(default_volume));
     core.add_property("playlist", PropertyValue::StringList(Vec::new()));
-
+    core.add_property("enable_eq", PropertyValue::Bool(enable_eq));
+    
     let db = Database::new("playlists.db")?;
     println!("[Database] Initialized playlists.db");
 
@@ -69,6 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ring_buffer_size
     );
 
+    
     let audio_for_track = Arc::clone(&audio_backend);
     if let Some(prop) = core.properties.get_mut("current_track") {
         prop.subscribe(Arc::new(move |value, core| {
@@ -95,6 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         prop.subscribe(Arc::new(move |value, _core| {
             if let Some(playing) = value.as_bool() {
                 let mut audio = audio_for_playing.lock().unwrap();
+		println!("callback");
                 if playing {
                     if let Err(e) = audio.play() {
                         eprintln!("[Audio] Failed to start playback: {}", e);
@@ -116,36 +120,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }));
     }
 
-    core.add_command(
-        "play",
-        Command {
-            execute: Arc::new(|params, core| {
-                if let Some(track) = params.get(0) {
-                    core.set_property("current_track", PropertyValue::String(track.clone()));
-                    core.set_property("playing", PropertyValue::Bool(true));
-                }
-            }),
-        },
-    );
-
-    core.add_command(
-        "pause",
-        Command {
-            execute: Arc::new(|_params, core| {
-                core.set_property("playing", PropertyValue::Bool(false));
-            }),
-        },
-    );
-
-    core.add_command(
-        "stop",
-        Command {
-            execute: Arc::new(|_params, core| {
-                core.set_property("playing", PropertyValue::Bool(false));
-                core.set_property("current_track", PropertyValue::String("none".to_string()));
-            }),
-        },
-    );
+    register_commands(&mut core);
+    
 
     core.add_command(
         "volume",
