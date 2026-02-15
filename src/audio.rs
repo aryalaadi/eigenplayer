@@ -165,8 +165,8 @@ impl AudioBackend {
                     }
                     return;
                 }
-		
-               for sample in data.iter_mut() {
+
+                for sample in data.iter_mut() {
                     // consume and apply volume on the sample
                     // and apply eq
                     let mut s = consumer.try_pop().unwrap_or(0.0);
