@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::*;
 
 // Property value types
 #[derive(Debug, Clone, PartialEq)]
@@ -7,6 +8,7 @@ pub enum PropertyValue {
     String(String),
     Bool(bool),
     Float(f32),
+    Int(i32),
     StringList(Vec<String>),
     EqBandList(Vec<[f32; 4]>),
 }
@@ -33,9 +35,23 @@ impl PropertyValue {
         }
     }
 
+    pub fn as_int(&self) -> Option<i32> {
+	match self {
+	    PropertyValue::Int(i) => Some(*i),
+	    _ => None,
+	}
+    }
+    
     pub fn as_string_list(&self) -> Option<&Vec<String>> {
         match self {
             PropertyValue::StringList(list) => Some(list),
+            _ => None,
+        }
+    }
+
+    pub fn as_eq_band_list(&self) -> Option<&Vec<[f32 ;4]>> {
+        match self {
+            PropertyValue::EqBandList(list) => Some(list),
             _ => None,
         }
     }
@@ -103,33 +119,31 @@ impl Core {
     }
 
     pub fn set_property(&mut self, name: &str, value: PropertyValue) {
-        println!(
+        info!(
             "[set_property] Called for '{}' with value: {:?}",
             name, value
         );
 
         let prop_callbacks = if let Some(prop) = self.properties.get_mut(name) {
             prop.set(value.clone());
-            println!(
+            info!(
                 "[set_property] Found property, callbacks count: {}",
                 prop.callbacks.len()
             );
             prop.callbacks.clone()
         } else {
-            println!("[set_property] Property '{}' not found!", name);
+            info!("[set_property] Property '{}' not found!", name);
             return;
         };
 
-        println!(
+        info!(
             "[set_property] Running {} property callbacks",
             prop_callbacks.len()
         );
-        for cb in &prop_callbacks {
-            println!("[set_property] Calling a property callback...");
-            cb(&value, self);
-            println!("[set_property] Callback returned");
-        }
 
+        for cb in &prop_callbacks {
+            cb(&value, self);
+        }
         let event = EventType::PropertyChanged(name.to_string());
         for cb in &self.event_callbacks {
             cb(&event, self);

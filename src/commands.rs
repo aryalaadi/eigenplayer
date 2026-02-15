@@ -1,12 +1,16 @@
 use crate::core::*;
 use std::sync::Arc;
+use tracing::*;
 
 fn play_command() -> Command {
     Command {
         execute: Arc::new(|params, core| {
             if let Some(track) = params.get(0) {
-                core.set_property("current_track", PropertyValue::String(track.clone()));
+		info!("settting track");
+		info!("set state to playing");
                 core.set_property("playing", PropertyValue::Bool(true));
+		
+                core.set_property("current_track", PropertyValue::String(track.clone()));
             }
         }),
     }

@@ -10,6 +10,7 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use tracing::*;
 
 use crate::eq::Eq;
 
@@ -158,7 +159,6 @@ impl AudioBackend {
                 let state = state_for_callback.lock().unwrap();
                 let mut consumer = consumer.lock().unwrap();
                 let mut eq = eq.lock().unwrap();
-
                 if !state.playing {
                     for sample in data.iter_mut() {
                         *sample = 0.0;
@@ -183,7 +183,7 @@ impl AudioBackend {
         stream.play()?;
         self.stream = Some(stream);
 
-        println!("[Audio Backend] Track loaded, decoder thread started");
+        info!("[Audio Backend] Track loaded, decoder thread started");
 
         Ok(())
     }
@@ -203,27 +203,27 @@ impl AudioBackend {
     }
 
     pub fn play(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("[Audio Backend] Starting playback");
+        info!("[Audio Backend] Starting playback");
         let mut state = self.state.lock().unwrap();
         state.playing = true;
         Ok(())
     }
 
     pub fn pause(&mut self) {
-        println!("[Audio Backend] Pausing playback");
+        info!("[Audio Backend] Pausing playback");
         let mut state = self.state.lock().unwrap();
         state.playing = false;
     }
 
     pub fn stop(&mut self) {
-        println!("[Audio Backend] Stopping playback");
+        info!("[Audio Backend] Stopping playback");
         self.stop_decoder();
         let mut state = self.state.lock().unwrap();
         state.playing = false;
     }
 
     pub fn set_volume(&mut self, volume: f32) {
-        println!("[Audio Backend] Setting volume to {}", volume);
+        info!("[Audio Backend] Setting volume to {}", volume);
         let mut state = self.state.lock().unwrap();
         state.volume = volume.clamp(0.0, 1.0);
     }
