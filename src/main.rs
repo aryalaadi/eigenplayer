@@ -26,36 +26,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Register default properties
     {
         let mut core_lock = core.lock().unwrap();
-        register_property(&mut *core_lock, 0.5, false);
+        register_property(&mut *core_lock);
     }
 
     // Load and execute config.lua to set config properties
     match std::fs::read_to_string("config.lua") {
-        Ok(script) => {
-            match init_lua(Arc::clone(&core)) {
-                Ok(lua) => match run_script(&lua, &script) {
-                    Ok(_) => info!("[Config] Successfully loaded and executed config.lua"),
-                    Err(e) => warn!("[Config] Failed to execute config.lua: {}", e),
-                },
-                Err(e) => warn!("[Config] Failed to initialize Lua for config: {}", e),
-            }
-        }
+        Ok(script) => match init_lua(Arc::clone(&core)) {
+            Ok(lua) => match run_script(&lua, &script) {
+                Ok(_) => info!("[Config] Successfully loaded and executed config.lua"),
+                Err(e) => warn!("[Config] Failed to execute config.lua: {}", e),
+            },
+            Err(e) => warn!("[Config] Failed to initialize Lua for config: {}", e),
+        },
         Err(_) => {
             warn!("[Config] config.lua not found, using default configuration");
         }
     }
-    
+
     // Now get the values from properties
     let (default_volume, ring_buffer_size, enable_eq, eq_bands) = {
         let core_lock = core.lock().unwrap();
         let default_volume = core_lock.get_float("default_volume").unwrap_or(0.5);
         let ring_buffer_size = core_lock.get_float("ring_buffer_size").unwrap_or(88200.0) as usize;
         let enable_eq = core_lock.get_bool("enable_eq").unwrap_or(false);
-        let eq_bands = core_lock.get_property("eq_bands").and_then(|v| v.as_eq_band_list()).cloned().unwrap_or_default();
+        let eq_bands = core_lock
+            .get_property("eq_bands")
+            .and_then(|v| v.as_eq_band_list())
+            .cloned()
+            .unwrap_or_default();
         (default_volume, ring_buffer_size, enable_eq, eq_bands)
     };
 
-    
     let db = Database::new("playlists.db")?;
     info!("[Database] Initialized playlists.db");
 
@@ -95,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut audio = audio_for_track.lock().unwrap();
                         if let Err(e) = audio.load_track(track) {
                             warn!("[Audio] Failed to load track: {}", e);
-                        } 
+                        }
                     }
                 }
             }));
