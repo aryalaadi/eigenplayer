@@ -159,6 +159,10 @@ impl Core {
         self.get_property(name).and_then(|v| v.as_string())
     }
 
+    pub fn get_int(&self, name: &str) -> Option<i32> {
+	self.get_property(name).and_then(|v| v.as_int())
+    }
+    
     pub fn get_bool(&self, name: &str) -> Option<bool> {
         self.get_property(name).and_then(|v| v.as_bool())
     }

@@ -11,4 +11,5 @@ pub fn register_property(core: &mut Core) {
     core.add_property("ring_buffer_size", PropertyValue::Int(88200));
     core.add_property("default_volume", PropertyValue::Float(0.5));
     core.add_property("eq_bands", PropertyValue::EqBandList(Vec::new()));
+    core.add_property("producer_sleep_time", PropertyValue::Int(100));
 }

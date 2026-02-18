@@ -22,6 +22,7 @@ pub struct AudioBackend {
     decoder_thread: Option<JoinHandle<()>>,
     ring_buffer_size: usize,
     eq: Arc<Mutex<Eq>>,
+    producer_sleep_time: u64,
 }
 
 struct AudioState {
@@ -39,6 +40,7 @@ impl AudioBackend {
         default_volume: f32,
         enable_eq: bool,
         eq_bands: Vec<[f32; 4]>,
+	producer_sleep_time: u64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let host = cpal::default_host();
         let device = host
@@ -64,6 +66,7 @@ impl AudioBackend {
             decoder_thread: None,
             ring_buffer_size,
             eq,
+	    producer_sleep_time
         })
     }
 
@@ -103,7 +106,7 @@ impl AudioBackend {
         let (mut producer, consumer) = ring.split();
 
         let state = Arc::clone(&self.state);
-
+	let pct = self.producer_sleep_time;
         let decoder_thread = thread::spawn(move || {
             let mut decoder = decoder;
             let mut format = format;
@@ -134,7 +137,7 @@ impl AudioBackend {
                 for sample in buf.samples() {
                     while producer.try_push(*sample).is_err() {
                         // you can rest twin
-                        thread::sleep(std::time::Duration::from_micros(100));
+                        thread::sleep(std::time::Duration::from_micros(pct));
 
                         let state = state.lock().unwrap();
                         if state.stop_signal {

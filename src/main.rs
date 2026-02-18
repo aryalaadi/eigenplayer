@@ -5,6 +5,7 @@ use eigenplayer::db::Database;
 use eigenplayer::lua::{init_lua, run_script};
 use eigenplayer::property::*;
 use eigenplayer::repl::Repl;
+use ringbuf::producer;
 use std::sync::{Arc, Mutex};
 use tracing::*;
 
@@ -44,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Now get the values from properties
-    let (default_volume, ring_buffer_size, enable_eq, eq_bands) = {
+    let (default_volume, ring_buffer_size, enable_eq, eq_bands, producer_sleep_time) = {
         let core_lock = core.lock().unwrap();
         let default_volume = core_lock.get_float("default_volume").unwrap_or(0.5);
         let ring_buffer_size = core_lock.get_float("ring_buffer_size").unwrap_or(88200.0) as usize;
@@ -54,7 +55,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|v| v.as_eq_band_list())
             .cloned()
             .unwrap_or_default();
-        (default_volume, ring_buffer_size, enable_eq, eq_bands)
+	let producer_sleep_time = core_lock.get_int("producer_sleep_time").unwrap_or(100);
+        (default_volume, ring_buffer_size, enable_eq, eq_bands, producer_sleep_time)
     };
 
     let db = Database::new("playlists.db")?;
@@ -78,6 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         default_volume,
         enable_eq,
         eq_bands,
+	producer_sleep_time as u64,
     )?));
 
     println!(
